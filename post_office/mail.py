@@ -3,6 +3,7 @@ import sys
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import connection as db_connection
+from django.db import transaction
 from django.db.models import Q
 from django.template import Context, Template
 from django.utils import timezone
@@ -190,11 +191,16 @@ def get_queued():
         (Q(scheduled_time__lte=now) | Q(scheduled_time__isnull=True)) &
         (Q(expires_at__gt=now) | Q(expires_at__isnull=True))
     )
-    return Email.objects.filter(query) \
+    return Email.objects.select_for_update(
+        skip_locked=True,
+        of=('self',),
+    ) \
+                .filter(query) \
                 .select_related('template') \
                 .order_by(*get_sending_order()).prefetch_related('attachments')[:get_batch_size()]
 
 
+@transaction.atomic
 def send_queued(processes=1, log_level=None):
     """
     Sends out all queued mails that has scheduled_time less than now or None
